@@ -1,0 +1,203 @@
+// this file include the code of ESP32 that is being used to Collect data from MQ4, MQ7, MQ135, DHT11, ADXL345, VL53L0X. 
+// this also includes the A LoRa module which is being used to transmitt all the data wirelessly.
+// Also the modules, that are being Initialised in this code, will work When their respective library will be installed 
+
+
+
+
+#include <SPI.h>
+#include <LoRa.h>
+
+#include <Wire.h>
+#include <DHT.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_ADXL345_U.h>
+#include <Adafruit_VL53L0X.h>
+
+// ---------------- PIN DEFINITIONS ----------------
+
+// LoRa
+#define LORA_SCK   18
+#define LORA_MISO  19
+#define LORA_MOSI  23
+#define LORA_SS    5
+#define LORA_RST   4
+#define LORA_DIO0  2
+
+// MQ sensors
+#define MQ4_PIN    34
+#define MQ7_PIN    35
+#define MQ135_PIN  32
+
+// DHT11
+#define DHT_PIN    27
+#define DHT_TYPE   DHT11
+
+// I2C
+#define SDA_PIN    21
+#define SCL_PIN    22
+
+// ---------------- OBJECTS ----------------
+
+DHT dht(DHT_PIN, DHT_TYPE);
+Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
+Adafruit_VL53L0X lox = Adafruit_VL53L0X();
+
+// ---------------- SETUP ----------------
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  Serial.println();
+  Serial.println("Rover LoRa Sensor Transmitter");
+
+  // ADC
+  analogReadResolution(12);
+
+  // I2C
+  Wire.begin(SDA_PIN, SCL_PIN);
+
+  // DHT
+  dht.begin();
+
+  // ADXL345
+  if (!accel.begin()) {
+    Serial.println("ADXL345 NOT FOUND!");
+    while (1);
+  }
+
+  accel.setRange(ADXL345_RANGE_16_G);
+
+  // VL53L0X
+  if (!lox.begin()) {
+    Serial.println("VL53L0X NOT FOUND!");
+    while (1);
+  }
+
+  Serial.println("Sensors OK");
+
+  // LoRa SPI
+  SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_SS);
+
+  LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
+
+  Serial.println("Starting LoRa...");
+
+  if (!LoRa.begin(433E6)) {
+    Serial.println("LoRa FAILED!");
+    while (1);
+  }
+
+  Serial.println("LoRa OK!");
+  Serial.println("Transmitting sensor data...");
+}
+
+// ---------------- LOOP ----------------
+
+void loop() {
+
+  // -------- MQ SENSOR VALUES --------
+
+  int mq4 = analogRead(MQ4_PIN);
+  int mq7 = analogRead(MQ7_PIN);
+  int mq135 = analogRead(MQ135_PIN);
+
+  // -------- DHT11 --------
+
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+
+  // -------- ADXL345 --------
+
+  sensors_event_t event;
+  accel.getEvent(&event);
+
+  float x = event.acceleration.x;
+  float y = event.acceleration.y;
+  float z = event.acceleration.z;
+
+  // -------- VL53L0X --------
+
+  VL53L0X_RangingMeasurementData_t measure;
+  lox.rangingTest(&measure, false);
+
+  int distance;
+
+  if (measure.RangeStatus != 4) {
+    distance = measure.RangeMilliMeter;
+  } else {
+    distance = -1;
+  }
+
+  // -------- SERIAL DISPLAY --------
+
+  Serial.println("--------------------------------");
+
+  Serial.print("MQ4: ");
+  Serial.println(mq4);
+
+  Serial.print("MQ7: ");
+  Serial.println(mq7);
+
+  Serial.print("MQ135: ");
+  Serial.println(mq135);
+
+  Serial.print("Temperature: ");
+  Serial.print(temperature);
+  Serial.println(" C");
+
+  Serial.print("Humidity: ");
+  Serial.print(humidity);
+  Serial.println(" %");
+
+  Serial.print("X: ");
+  Serial.print(x);
+  Serial.print("  Y: ");
+  Serial.print(y);
+  Serial.print("  Z: ");
+  Serial.println(z);
+
+  Serial.print("Distance: ");
+  Serial.print(distance);
+  Serial.println(" mm");
+
+  // -------- CREATE LORA PACKET --------
+
+  LoRa.beginPacket();
+
+  LoRa.print("DATA,");
+
+  LoRa.print("MQ4=");
+  LoRa.print(mq4);
+
+  LoRa.print(",MQ7=");
+  LoRa.print(mq7);
+
+  LoRa.print(",MQ135=");
+  LoRa.print(mq135);
+
+  LoRa.print(",T=");
+  LoRa.print(temperature, 1);
+
+  LoRa.print(",H=");
+  LoRa.print(humidity, 1);
+
+  LoRa.print(",X=");
+  LoRa.print(x, 2);
+
+  LoRa.print(",Y=");
+  LoRa.print(y, 2);
+
+  LoRa.print(",Z=");
+  LoRa.print(z, 2);
+
+  LoRa.print(",D=");
+  LoRa.print(distance);
+
+  LoRa.endPacket();
+
+  Serial.println("Packet transmitted.");
+
+  delay(1000);
+}
